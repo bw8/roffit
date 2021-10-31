@@ -9,13 +9,20 @@ rofi_command="rofi -i -theme roffit.rasi "
 # Filter clipboard if there is no link to reddit post containing media to download
 link=$(xclip -selection c -o | grep -e "https://.*reddit.*/r/.*" )
 if [ -z "$link" ]; then
-    dunstify -u low "No link containing media"
-    exit
+    link=$(xclip -selection c -o | grep -e "https://.*" )
+    if [ -z "$link" ]; then
+        dunstify -u low "No link"
+        exit 1;
+    fi
 fi
 
 # Get information (thumbnail, image or video and subreddit)
 function fetch_info (){
     json=$(curl -sH "User-agent: 'botijo'" "$link".json | jq '.')
+    if [[ -z "$json" ]]; then
+        dunstify "Where is Jason?"
+        exit 1
+    fi
     thumb=$(echo "$json" | grep -m1 -oP '(?<="thumbnail": ").*\.[jpegnmif]{3,4}') 
     image=$(echo "$json" | grep -m1 -oP '(?<="url_overridden_by_dest": ").*\.[jpegnmif]{3,4}') 
     video=$(echo "$json" | grep -m1 -oP '(?<="fallback_url": ").*\.[mp4]+')
@@ -28,6 +35,7 @@ function download (){
     if [[ -n "$video" ]]; then 
         name=$(basename "$video")
         wget -q -np -nc -P "$tmp_dir/$subr" "$video"
+    # elif [[ -n "$image" ]]; then
     else
         name=$(basename "$image")
         wget -q -np -nc -P "$tmp_dir/$subr" "$image"
@@ -37,9 +45,14 @@ function download (){
 
 fetch_info
 if [[ -n "$video" ]]; then 
-        name=$(basename "$video")
+    rofi_command="$rofi_command -p "
+    name=$(basename "$video")
+elif [[ -n "$image" ]]; then 
+    rofi_command="$rofi_command -p "
+    name=$(basename "$image")
 else
-        name=$(basename "$image")
+    dunstify "No media available"
+    exit 1;
 fi
 
 # tmp directory
@@ -47,38 +60,48 @@ tmp_dir="/tmp/roffit"
 mkdir -p "$tmp_dir/$subr"
 
 # download thumbnail
-wget -q -np -nc -P "$tmp_dir" "$thumb"
+wget -q -np -nc -P "$tmp_dir" "$thumb" -O "$tmp_dir/thumb.jpg"
 thumbname=$(basename "$thumb")
-
-# Options displayed by rofi
-option1="Save image to $subr directory"
-option2="Save image to.."
-option3="Save image and preview"
-option4="Preview image without saving"
-
-options="$option1\n$option2\n$option3\n$option4"
 download &
 
-# Show thumbnail using notification
-notid="$(dunstify -a "roffit" -i "$tmp_dir/$thumbname" -t 20000 -p "")"
+# Options displayed by rofi
+option1="  $name"
+option2="  $subr"
+option3="  ~/img/dwn"
+option4="   $name"
+
+options="$option1\n$option2\n$option3"
+
 # Prompt menu to user
 chosen="$(echo -e "$options" | $rofi_command -dmenu )"
 
 # Close notification
-dunstify -C "$notid"
+#dunstify -C "$notid"
 case $chosen in
     $option1)
+        # Open it before removing it
+        save="$(sxiv -aobfq "$tmp_dir/$subr/$name")" || \
+        mpv --loop --fs "$tmp_dir/$subr/$name"
+        # Mark to save image
+        if [[ -n "$save" ]]; then
+            mkdir -p "$HOME/imgs/Boost/$subr"
+            mv "$tmp_dir/$subr/$name" "$HOME/imgs/Boost/$subr"
+            dunstify -i "$HOME/imgs/Boost/$subr/$name" "$name" "saved from r/$subr"
+        fi
+        ;;
+    $option2)
         # Save file inside subreddit directory
         mkdir -p "$HOME/imgs/Boost/$subr"
         mv "$tmp_dir/$subr/$name" "$HOME/imgs/Boost/$subr"
         dunstify -i "$HOME/imgs/Boost/$subr/$name" "$name" "saved from r/$subr"
         ;;
-    $option2)
-        # Save file inside nice directory
-        mv "$tmp_dir/$subr/$name" "$HOME/imgs/nice"
-        dunstify -i "$HOME/imgs/Boost/$subr/$name" "$name" "saved from r/$subr"
-        ;;
     $option3)
+        # Save file inside imgs/dwn directory
+        # wget -q -np -nc -P "$HOME/imgs/dwn" "$link"
+        mv "$tmp_dir/$subr/$name" "$HOME/imgs/dwn/"
+        dunstify -i "$HOME/imgs/dwn/$name" "$name" "saved in imgs/dwn"
+        ;;
+    $option4)
         # Save file inside subreddit directory and open it
         mkdir -p "$HOME/imgs/Boost/$subr"
         mv "$tmp_dir/$subr/$name" "$HOME/imgs/Boost/$subr"
@@ -86,12 +109,7 @@ case $chosen in
         mpv --loop --fs "$HOME/imgs/Boost/$subr/$name"
         dunstify -i "$HOME/imgs/Boost/$subr/$name" "$name" "saved from r/$subr"
         ;;
-    $option4)
-        # Open it before remove it
-        sxiv -abfq "$tmp_dir/$subr/$name" || \
-        mpv --loop --fs "$tmp_dir/$subr/$name"
-        ;;
 esac
 
 # Remove all tmp files
-rm -r $tmp_dir/*
+rm -rf $tmp_dir/*
