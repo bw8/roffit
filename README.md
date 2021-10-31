@@ -3,4 +3,4 @@ Roffit, script to download media posted in reddit and save it in directories bas
 
 Dependencies:
 - **Rofi** (for showing the menu)
-- **Dunst** (optional, to preview image while showing rofi menu)
+- **Dunst** (optional, to see error messages)
